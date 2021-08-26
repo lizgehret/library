@@ -7,6 +7,7 @@
 # ----------------------------------------------------------------------------
 
 from django import http
+from django.core.exceptions import PermissionDenied
 from django.views.decorators import csrf
 
 from . import forms
@@ -19,16 +20,37 @@ def prepare_packages_for_integration(request):
         payload = {'status': 'error', 'errors': {'http_method': 'invalid http method'}}
         return http.JsonResponse(payload, status=405)
 
-    form = forms.PackageIntegrationForm(request.POST)
+    form = forms.PackageIntegrationForm(request.POST, initial={'build_target': 'dev'})
 
-    # First line of checks: ensure that the payload is well formed
     if not form.is_valid():
         payload = {'status': 'error', 'errors': form.errors}
         return http.JsonResponse(payload, status=400)
 
-    # Next, we actually check if we know about this plugin, without leaking that info to the requester
     if (config := form.is_known()):
-        tasks.handle_new_builds(config)
+        tasks.handle_new_package_build(config)
 
+    payload = {'status': 'ok'}
+    return http.JsonResponse(payload, status=200)
+
+
+@csrf.csrf_exempt
+def finalize_integration(request):
+    if request.method != 'POST':
+        payload = {'status': 'error', 'errors': {'http_method': 'invalid http method'}}
+        return http.JsonResponse(payload, status=405)
+
+    form = forms.DistroIntegrationForm(request.POST)
+
+    if not form.is_valid():
+        payload = {'status': 'error', 'errors': form.errors}
+        return http.JsonResponse(payload, status=400)
+
+    try:
+        config = form.is_authorized()
+    except PermissionDenied:
+        payload = {'status': 'error', 'errors': {'token': 'invalid token'}}
+        return http.JsonResponse(payload, status=401)
+
+    tasks.handle_new_distro_build(config)
     payload = {'status': 'ok'}
     return http.JsonResponse(payload, status=200)

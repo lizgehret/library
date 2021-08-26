@@ -6,14 +6,11 @@
 # The full license is in the file LICENSE, distributed with this software.
 # ----------------------------------------------------------------------------
 
-import pathlib
-
 from django import forms, conf
+from django.core.exceptions import PermissionDenied
 
-from ..packages.models import Package
-
-
-BASE_PATH = pathlib.Path(conf.settings.CONDA_ASSET_PATH) / 'qiime2' / conf.settings.QIIME2_RELEASE
+from .tasks import DistroBuildCfg
+from ..packages.models import Package, Epoch
 
 
 class PackageIntegrationForm(forms.Form):
@@ -23,26 +20,55 @@ class PackageIntegrationForm(forms.Form):
     package_name = forms.CharField(required=True)
     repository = forms.CharField(required=True)
     artifact_name = forms.CharField(required=True)
-    dev_mode = forms.BooleanField(required=False, initial=False)
+    build_target = forms.CharField(required=False)
 
     def is_known(self):
-        channel_path = BASE_PATH / 'tested'
         try:
-            package = Package.objects.get(token=self.cleaned_data['token'])
+            Package.objects.get(token=self.cleaned_data['token'])
+            build_target = self.cleaned_data['build_target']
+            build_target = build_target if build_target != '' else 'dev'
 
             config = {
-                'package_id': package.pk,
-                'run_id': self.cleaned_data['run_id'],
                 'version': self.cleaned_data['version'],
+                'run_id': self.cleaned_data['run_id'],
                 'package_name': self.cleaned_data['package_name'],
                 'repository': self.cleaned_data['repository'],
                 'artifact_name': self.cleaned_data['artifact_name'],
                 'github_token': conf.settings.GITHUB_TOKEN,
-                'channel': str(channel_path),
-                'channel_name': '%s-tested' % (conf.settings.QIIME2_RELEASE,),
-                'dev_mode': self.cleaned_data['dev_mode'],
+                'build_target': build_target,
+                'epoch_names': Epoch.objects.by_build_target(build_target).values_list('name', flat=True),
+                'package_token': str(self.cleaned_data['token']),
             }
         except Package.DoesNotExist:
             config = None
+
+        return config
+
+
+class DistroIntegrationForm(forms.Form):
+    token = forms.CharField(required=True)
+    version = forms.CharField(required=True)
+    run_id = forms.CharField(required=True)
+    distro = forms.CharField(required=True)
+    epoch = forms.CharField(required=True)
+    artifact_name = forms.CharField(required=True)
+    pr_number = forms.IntegerField(required=True)
+
+    def is_authorized(self):
+        token = conf.settings.INTEGRATION_REPO['token']
+        if token != self.cleaned_data['token']:
+            raise PermissionDenied
+
+        config = DistroBuildCfg(
+            version=self.cleaned_data['version'],
+            run_id=self.cleaned_data['run_id'],
+            package_name=self.cleaned_data['distro'],
+            epoch_name=self.cleaned_data['epoch'],
+            artifact_name=self.cleaned_data['artifact_name'],
+            github_token=conf.settings.GITHUB_TOKEN,
+            pr_number=self.cleaned_data['pr_number'],
+            owner=conf.settings.INTEGRATION_REPO['owner'],
+            repo=conf.settings.INTEGRATION_REPO['repo'],
+        )
 
         return config

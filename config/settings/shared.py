@@ -7,8 +7,10 @@
 # ----------------------------------------------------------------------------
 
 import os
+import pathlib
 
 import environ
+from celery.schedules import crontab
 
 
 env = environ.Env()
@@ -99,13 +101,55 @@ RABBITMQ_URL = env('RABBITMQ_URL', default='amqp://guest@mq')
 CELERY_BROKER_URL = env('RABBITMQ_URL', default='amqp://guest@mq')
 CELERY_RESULT_BACKEND = 'django-db'
 CELERY_RESULT_EXPIRES = 60 * 60 * 24  # once per day
-CELERY_RESULT_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'library-json'
+CELERY_TASK_SERIALIZER = 'library-json'
+CELERY_ACCEPT_CONTENT = ['library-json']
 CELERY_TASK_ROUTES = {
     'index.*': {'queue': 'default'},
     'db.*': {'queue': 'db'},
     'packages.*': {'queue': 'packages'},
     'git.*': {'queue': 'git'},
+    'periodic.*': {'queue': 'periodic'},
+    # NOTE: pipeline must run on the same worker node as `db`
+    'pipeline.*': {'queue': 'pipeline'},
 }
+CONDA_ASSET_PATH = pathlib.Path('data/')
+BASE_CONDA_PATH = CONDA_ASSET_PATH / 'qiime2'
 GITHUB_TOKEN = env('GITHUB_TOKEN', default='')
-CONDA_ASSET_PATH = 'data/'
-QIIME2_RELEASE = '2021.8'
+# Don't forget to update local.py when changing here
+TASK_TIMES = {
+    '03_MIN': 60 * 3,
+    '05_MIN': 60 * 5,
+    '10_MIN': 60 * 10,
+    '90_MIN': 60 * 90,
+    '02_HR': 60 * 60 * 2,
+
+    '4A_CRON': crontab(minute=0, hour=4),  # daily at 4a
+    'HRLY_CRON': crontab(minute=0),  # hourly
+}
+
+
+def generate_beat_schedule(TASK_TIMES):
+    return {
+        'periodic.clean_up_backend': {
+            'task': 'db.celery_backend_cleanup',
+            'schedule': TASK_TIMES['4A_CRON'],
+        },
+        'periodic.handle_prs': {
+            'task': 'pipeline.handle_prs',
+            'schedule': TASK_TIMES['HRLY_CRON'],
+        },
+        'periodic.reindex_conda_channels': {
+            'task': 'pipeline.reindex_conda_channels',
+            'schedule': TASK_TIMES['05_MIN'],
+        },
+    }
+
+
+CELERY_BEAT_SCHEDULE = generate_beat_schedule(TASK_TIMES)
+INTEGRATION_REPO = {
+    'owner': 'not-a-real-owner',
+    'repo': 'package-integration',
+    'branch': 'main',
+    'token': 'foo',
+}

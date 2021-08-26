@@ -37,10 +37,15 @@ from .shared import (
     CELERY_BROKER_URL,
     CELERY_RESULT_BACKEND,
     CELERY_RESULT_SERIALIZER,
+    CELERY_TASK_SERIALIZER,
+    CELERY_ACCEPT_CONTENT,
     CELERY_TASK_ROUTES,
     GITHUB_TOKEN,
     CONDA_ASSET_PATH,
-    QIIME2_RELEASE,
+    BASE_CONDA_PATH,
+    INTEGRATION_REPO,
+
+    generate_beat_schedule,
 )
 
 
@@ -77,10 +82,15 @@ __all__ = [
     'CELERY_RESULT_BACKEND',
     'CELERY_RESULT_EXPIRES',
     'CELERY_RESULT_SERIALIZER',
+    'CELERY_TASK_SERIALIZER',
+    'CELERY_ACCEPT_CONTENT',
     'CELERY_TASK_ROUTES',
+    'TASK_TIMES',
+    'CELERY_BEAT_SCHEDULE',
     'GITHUB_TOKEN',
     'CONDA_ASSET_PATH',
-    'QIIME2_RELEASE',
+    'BASE_CONDA_PATH',
+    'INTEGRATION_REPO',
 ]
 
 MIDDLEWARE.extend([
@@ -89,3 +99,14 @@ MIDDLEWARE.extend([
 INTERNAL_IPS = ['127.0.0.1', 'localhost']
 INSTALLED_APPS = ['whitenoise.runserver_nostatic', *INSTALLED_APPS, 'debug_toolbar']
 CELERY_RESULT_EXPIRES = 60 * 10
+# For development purposes it's a lot nicer to have short cycle times (30 sec)
+TASK_TIMES = {
+    '03_MIN': 30,
+    '05_MIN': 30,
+    '10_MIN': 30,
+    '90_MIN': 30,
+    '02_HR': 30,
+    '4A_CRON': 30,
+    'HRLY_CRON': 30,
+}
+CELERY_BEAT_SCHEDULE = generate_beat_schedule(TASK_TIMES)

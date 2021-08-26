@@ -7,14 +7,19 @@
 # ----------------------------------------------------------------------------
 
 import base64
+import collections
 import contextlib
+import copy
 import json
+import os
 from packaging import version
+import pathlib
 import shutil
 import urllib.request
 import urllib.error
 import zipfile
 
+from django import conf
 from django.db import connection
 from fastcore.utils import HTTP404NotFoundError
 from ghapi.all import GhApi
@@ -37,33 +42,29 @@ class GitHubArtifactManager:
         self.artifact_name = artifact_name
         self.root_pathlib = tmpdir
         self.base_url = 'https://api.github.com'
-        self.valid_names = {'linux-64', 'osx-64'}
 
         self.validate_config()
 
     def validate_config(self):
         if self.github_token == '':
-            raise Exception('TODO1')
+            raise Exception('Missing Github Token')
 
         if self.github_repository == '':
-            raise Exception('TODO2')
+            raise Exception('Missing Github Repository')
         parts = self.github_repository.split('/')
         if len(parts) != 2:
-            raise Exception('TODO3')
+            raise Exception('Invalid Github Repository Format: %s' % (self.github_repository,))
         org, repo = parts
         if org == '':
-            raise Exception('TODO4')
+            raise Exception('Missing Github Org/Name')
         if repo == '':
-            raise Exception('TODO5')
+            raise Exception('Missing Github Repo')
 
         if self.run_id == '':
-            raise Exception('TODO6')
+            raise Exception('Missing Github Actions Run ID')
 
         if self.artifact_name == '':
-            raise Exception('TODO7')
-
-        if self.artifact_name not in self.valid_names:
-            raise Exception('TODO8')
+            raise Exception('Missing Artifact Name')
 
     def build_request(self, url, headers=None):
         request = urllib.request.Request(url)
@@ -84,7 +85,7 @@ class GitHubArtifactManager:
 
     def fetch_binary_file(self, url, download_pathlib):
         if download_pathlib.exists():
-            raise Exception('TODO9')
+            raise Exception('Attempting to overwrite file that already exists: %s' % (download_pathlib,))
 
         try:
             request = self.build_request(url)
@@ -112,10 +113,11 @@ class GitHubArtifactManager:
                 if record['size_in_bytes'] <= 100000000:
                     filtered_records.append(record)
                 else:
-                    raise Exception('TODO10')
+                    raise Exception('Artifact size too large: %d' % (record['size_in_bytes'],))
 
         if len(filtered_records) != 1:
-            raise GitHubNotReadyException('TODO11: %r' % (filtered_records, ))
+            raise GitHubNotReadyException('Incorrect number of filtered records: %r' %
+                                          (filtered_records, ))
 
         return filtered_records
 
@@ -140,9 +142,11 @@ def unzip(fp_pathlib):
         zip_fh.extractall(str(fp_pathlib.parent / new_name))
 
 
-def bootstrap_pkgs_dir(fp_pathlib):
+def bootstrap_pkgs_dir(fp):
+    if isinstance(fp, str):
+        fp = pathlib.Path(fp)
     for arch in ('linux-64', 'osx-64'):
-        (fp_pathlib / arch).mkdir(parents=True, exist_ok=True)
+        (fp / arch).mkdir(parents=True, exist_ok=True)
 
 
 @contextlib.contextmanager
@@ -159,73 +163,81 @@ def advisory_lock(lock_id):
         cursor.close()
 
 
-class CondaBuildConfigManager:
-    def __init__(self, github_token, branch, release, gate, package_name, version):
+class IntegrationGitRepoManager:
+    def __init__(self, github_token):
+        if github_token == '':
+            raise Exception('Missing Github Token')
+
         self.github_token = github_token
-        self.branch = branch
-        self.release = release
-        self.gate = gate
-        self.package_name = package_name.replace('-', '_')
-        self.version = version
 
-        self.validate_config()
-
-        self.path = '%s/%s/conda_build_config.yaml' % (self.release, self.gate)
-        self.commit_msg = 'updating %s: %s=%s' % (self.path, self.package_name, self.version)
-        self.owner = 'qiime2'
-        self.repo = 'package-integration'
+        self.owner = conf.settings.INTEGRATION_REPO['owner']
+        self.repo = conf.settings.INTEGRATION_REPO['repo']
+        self.main_branch = conf.settings.INTEGRATION_REPO['branch']
         self.ghapi = None
 
-    def validate_config(self):
-        if self.github_token == '':
-            raise Exception('TODO12')
+    def construct_interface(self):
+        if self.ghapi is None:
+            self.ghapi = GhApi(token=self.github_token)
 
-        if self.branch == '':
-            raise Exception('TODO13')
+    def path_builder(self, epoch, gate, fn, distro=None):
+        if distro is None:
+            parts = [epoch, gate, fn]
+        else:
+            parts = [epoch, gate, distro, fn]
+        return os.path.join(*parts)
 
-        # TODO: wire up cycles from ALP
-        if self.release == '':
-            raise Exception('TODO14')
+    def update_conda_build_config(self, branch, epoch, gate, package_versions):
+        if branch == '':
+            raise Exception('Missing branch')
 
-        if self.gate not in ('tested', 'staged'):
-            raise Exception('TODO15')
+        if epoch == '':
+            raise Exception('Missing epoch name')
 
-        if self.package_name == '':
-            raise Exception('TODO16')
+        if gate not in ('tested', 'staged', 'released'):
+            raise Exception('Incorrect gate: %s' % (gate,))
 
-        if self.version == '':
-            raise Exception('TODO17')
+        if len(package_versions) < 1:
+            raise Exception('Missing package versions')
 
-    def update(self):
         with advisory_lock(42) as lock:
             if lock:
                 # Wait until we get a lock before setting up ghapi
-                self.ghapi = GhApi(token=self.github_token)
-                cbc, sha = self.fetch_from_github()
-                if self.package_name in cbc:
-                    last_versions = cbc[self.package_name]
-                    if len(last_versions) != 1:
-                        raise Exception('TODO18')
-                    current_version = version.parse(str(self.version))
-                    last_version = version.parse(str(last_versions[0]))
-                    if current_version < last_version:
-                        raise Exception('TODO19')
-                cbc[self.package_name] = [self.version]
-                self.commit_to_github(cbc, sha)
+                self.construct_interface()
+                for distro, package_versions in package_versions.items():
+                    path = self.path_builder(epoch=epoch,
+                                             gate=gate,
+                                             fn='conda_build_config.yaml',
+                                             distro=distro)
+                    msg = 'updating %s\n\n' % (path,)
+                    cbc, sha = self.fetch_yaml_from_github(path)
+                    for package_name, ver in package_versions.items():
+                        # cbc.yml _needs_ snake case names
+                        package_name = package_name.replace('-', '_')
+                        if package_name in cbc:
+                            last_versions = cbc[package_name]
+                            if len(last_versions) != 1:
+                                raise Exception('Incorrect number of versions')
+                            if compare_package_versions(ver, last_versions[0]):
+                                raise Exception('Package version confusion')
+                        cbc[package_name] = [ver]
+                        msg += '- %s ==%s\n' % (package_name, ver)
+                    self.add_branch_if_missing(branch)
+                    self.commit_to_github(cbc, sha, path, msg, branch)
             else:
                 raise AdvisoryLockNotReadyException
 
-    def fetch_from_github(self):
+    def fetch_yaml_from_github(self, path):
         try:
             payload = self.ghapi.repos.get_content(
                 owner=self.owner,
                 repo=self.repo,
-                path=self.path,
-                ref=self.branch,
+                path=path,
+                # always use latest main as a basis
+                ref=self.main_branch,
             )
 
-            cbc = base64.b64decode(payload['content'])
-            parsed = yaml.load(cbc, Loader=yaml.FullLoader)
+            content = base64.b64decode(payload['content'])
+            parsed = yaml.load(content, Loader=yaml.FullLoader)
 
             results = (parsed, payload['sha'])
         except HTTP404NotFoundError:
@@ -233,15 +245,145 @@ class CondaBuildConfigManager:
 
         return results
 
-    def commit_to_github(self, cbc, sha):
-        updated = yaml.dump(cbc)
+    def add_branch_if_missing(self, branch):
+        try:
+            self.ghapi.repos.get_branch(
+                owner=self.owner,
+                repo=self.repo,
+                branch=branch,
+            )
+        except HTTP404NotFoundError:
+            payload = self.ghapi.git.get_ref(
+                owner=self.owner,
+                repo=self.repo,
+                ref='heads/%s' % (self.main_branch,),
+            )
+            self.ghapi.git.create_ref(
+                owner=self.owner,
+                repo=self.repo,
+                ref='refs/heads/%s' % (branch,),
+                sha=payload['object']['sha'],
+            )
+
+    def commit_to_github(self, yaml_content, sha, path, msg, branch):
+        updated = yaml.dump(yaml_content)
         content = base64.b64encode(updated.encode('utf-8')).decode('utf-8')
 
         self.ghapi.repos.create_or_update_file_contents(
             owner=self.owner,
             repo=self.repo,
-            path=self.path,
-            message=self.commit_msg,
+            path=path,
+            message=msg,
             content=content,
             sha=sha,
+            branch=branch
         )
+
+    def update_distro_metapackage_recipe(self, epoch, gate, distro, packages, branch):
+        path = self.path_builder(epoch=epoch, gate=gate, fn='data.yaml', distro=distro)
+        msg = 'updating %s\n\n' % (path,)
+        data, sha = self.fetch_yaml_from_github(path)
+        if 'run' not in data:
+            raise Exception('Something went wrong fetching YAML from GH')
+        run_reqs = copy.deepcopy(data['run'])
+        run_reqs = set(run_reqs)
+        changes = False
+        for package in packages:
+            if package not in data['run']:
+                run_reqs.add(package)
+                msg += '- %s\n' % (package,)
+                changes = True
+        if changes:
+            data['run'] = sorted(run_reqs)
+            self.commit_to_github(data, sha, path, msg, branch)
+
+    def update_integration(self, branch, epoch, gate, package_versions):
+        self.construct_interface()
+        self.update_conda_build_config(branch, epoch, gate, package_versions)
+
+        for distro, pkg_vers in package_versions.items():
+            if distro is None:
+                raise Exception('Missing distro name')
+            packages = set(pkg_vers.keys())
+            self.update_distro_metapackage_recipe(epoch, gate, distro, packages, branch)
+
+    def open_pr(self, branch, pr_msg):
+        self.construct_interface()
+        payload = self.ghapi.pulls.create(
+            owner=self.owner,
+            repo=self.repo,
+            title=pr_msg,
+            head=branch,
+            base=self.main_branch,
+            maintainer_can_modify=True,
+            draft=False,
+        )
+
+        return payload['html_url']
+
+    def merge_integration_pr(self, pr_number):
+        self.construct_interface()
+
+        try:
+            self.ghapi.pulls.check_if_merged(
+                owner=self.owner,
+                repo=self.repo,
+                pull_number=pr_number,
+            )
+        # 404 when PR not merged (this is weird, right?)
+        except HTTP404NotFoundError:
+            payload = self.ghapi.pulls.merge(
+                owner=self.owner,
+                repo=self.repo,
+                pull_number=pr_number,
+                commit_title='merging pr %d' % (pr_number,),
+                merge_method='merge',
+            )
+
+            if not payload['merged']:
+                raise Exception('Something went wrong merging PR')
+
+
+def compare_package_versions(a, b):
+    pkg_ver_a = version.Version(str(a))
+    pkg_ver_b = version.Version(str(b))
+    return pkg_ver_a < pkg_ver_b
+
+
+def is_release_package(ver_str):
+    pkg_ver = version.Version(ver_str)
+    # https://packaging.pypa.io/en/latest/version.html#packaging.version.Version.is_prerelease
+    # A boolean value indicating whether this Version instance represents a
+    # prerelease and/or development release.
+    return not pkg_ver.is_prerelease
+
+
+def find_packages_ready_for_integration(package_build_records):
+    package_versions = collections.defaultdict(dict)
+    package_build_pks = set()
+
+    for distro, records in package_build_records.items():
+        for record in records:
+            package_name = record['package__name']
+            version = record['version']
+            pk = str(record['id'])
+            if package_name in package_versions[distro]:
+                # in case multiple versions exist at this point, only consider the _newest_ one
+                if compare_package_versions(package_versions[distro][package_name], version):
+                    package_versions[distro][package_name] = version
+                    package_build_pks.add(pk)
+            else:
+                package_versions[distro][package_name] = version
+                package_build_pks.add(pk)
+
+    return dict(package_versions), package_build_pks
+
+
+def filter_release_package_versions(package_versions):
+    filtered = collections.defaultdict(dict)
+    for distro, versions in package_versions.items():
+        for pkg_name, pkg_version in versions.items():
+            if is_release_package(pkg_version):
+                filtered[distro][pkg_name] = pkg_version
+
+    return dict(filtered)

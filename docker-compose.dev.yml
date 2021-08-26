@@ -9,14 +9,16 @@ services:
       - POSTGRES_HOST_AUTH_METHOD=trust
 
   mq:
-    image: rabbitmq
+    image: rabbitmq:3-management
+    ports:
+      - 15672:15672
 
   worker:
     build:
       context: .
       args:
         RUNENV: local
-    command: bash -c "python manage.py celery_worker amqp://guest@mq/ debug packages,db,git,default"
+    command: bash -c "celery -A config.celery -b amqp://guest@mq/ worker --loglevel=info -Q packages,db,git,default,periodic,pipeline"
     depends_on:
       - mq
     links:
@@ -32,9 +34,7 @@ services:
       context: .
       args:
         RUNENV: local
-    command: bash -c "python manage.py celery_beat"
-    depends_on:
-      - worker
+    command: bash -c "celery -A config.celery beat --loglevel debug"
     volumes:
       - .:/code
       - ./data:/data
@@ -48,32 +48,9 @@ services:
     depends_on:
       - db
       - mq
-      - worker
-      - beat
     environment:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
     ports:
       - 8000:8000
-    volumes:
-      - .:/code
-
-  packages:
-    command: bash -c "cd /data && python -m http.server 8001"
-    image: python
-    ports:
-      - 8001:8001
-    volumes:
-      - ./data:/data
-
-  flower:
-    build:
-      context: .
-      args:
-        RUNENV: local
-    command: bash -c "python manage.py celery_flower"
-    depends_on:
-      - web
-    ports:
-      - 5555:5555
     volumes:
       - .:/code

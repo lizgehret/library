@@ -6,6 +6,8 @@
 # The full license is in the file LICENSE, distributed with this software.
 # ----------------------------------------------------------------------------
 
+import pathlib
+
 from .shared import (
     BASE_DIR,
     PROJ_DIR,
@@ -107,4 +109,4 @@ TASK_TIMES = {
     'HRLY_CRON': 30,
 }
 CELERY_BEAT_SCHEDULE = generate_beat_schedule(TASK_TIMES)
-BASE_CONDA_PATH = 'data/qiime2'
+BASE_CONDA_PATH = pathlib.Path('data/qiime2')

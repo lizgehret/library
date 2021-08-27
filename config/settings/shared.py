@@ -7,6 +7,7 @@
 # ----------------------------------------------------------------------------
 
 import os
+import pathlib
 
 import environ
 from celery.schedules import crontab
@@ -112,7 +113,7 @@ CELERY_TASK_ROUTES = {
     # NOTE: pipeline must run on the same worker node as `db`
     'pipeline.*': {'queue': 'pipeline'},
 }
-BASE_CONDA_PATH = '/data/qiime2'
+BASE_CONDA_PATH = pathlib.Path('/data/qiime2')
 GITHUB_TOKEN = env('GITHUB_TOKEN', default='')
 # Don't forget to update local.py when changing here
 TASK_TIMES = {

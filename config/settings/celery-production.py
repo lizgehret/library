@@ -96,3 +96,4 @@ DEBUG = False
 INTERNAL_IPS = ['127.0.0.1', 'localhost']
 INSTALLED_APPS = ['whitenoise.runserver_nostatic', *INSTALLED_APPS]
 CONDA_ASSET_PATH = '/data/'
+INTEGRATION_REPO['owner'] = 'qiime2'

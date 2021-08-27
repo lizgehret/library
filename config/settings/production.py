@@ -78,7 +78,6 @@ __all__ = [
     'TASK_TIMES',
     'CELERY_BEAT_SCHEDULE',
     'GITHUB_TOKEN',
-    'CONDA_ASSET_PATH',
     'INTEGRATION_REPO',
     'BASE_CONDA_PATH',
 ]
@@ -104,6 +103,5 @@ TEMPLATES[0]['OPTIONS']['context_processors'].append('library.utils.context_proc
 RABBITMQ_URL = env('RABBITMQ_URL')
 # We want to use the rmq url set by dokku
 CELERY_BROKER_URL = env('RABBITMQ_URL')
-CONDA_ASSET_PATH = '/data/'
 INTEGRATION_REPO['owner'] = 'qiime2'
 INTEGRATION_REPO['token'] = env('INTEGRATION_REPO_TOKEN')

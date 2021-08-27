@@ -41,8 +41,6 @@ from .shared import (
     CELERY_ACCEPT_CONTENT,
     CELERY_TASK_ROUTES,
     GITHUB_TOKEN,
-    CONDA_ASSET_PATH,
-    BASE_CONDA_PATH,
     INTEGRATION_REPO,
 
     generate_beat_schedule,
@@ -88,7 +86,6 @@ __all__ = [
     'TASK_TIMES',
     'CELERY_BEAT_SCHEDULE',
     'GITHUB_TOKEN',
-    'CONDA_ASSET_PATH',
     'BASE_CONDA_PATH',
     'INTEGRATION_REPO',
 ]
@@ -110,3 +107,4 @@ TASK_TIMES = {
     'HRLY_CRON': 30,
 }
 CELERY_BEAT_SCHEDULE = generate_beat_schedule(TASK_TIMES)
+BASE_CONDA_PATH = 'data/qiime2'

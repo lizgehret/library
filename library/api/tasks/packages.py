@@ -68,7 +68,7 @@ def find_packages_to_copy(ctx: 'DistroBuildCtx', cfg: 'DistroBuildCfg'):  # noqa
     fns = []
     for pkg, ver in cfg.package_versions.items():
         base_dir = pathlib.Path(cfg.from_channel)
-        fn_pair = [str(fn.relative_to(base_dir)) for fn in base_dir.glob('**/%s*%s*.tar.bz2' % (pkg, ver))]
+        fn_pair = [str(fn.relative_to(base_dir)) for fn in base_dir.glob('**/%s-%s-*.tar.bz2' % (pkg, ver))]
         if len(fn_pair) != 2:  # 2 bc one osx, one linux
             raise Exception('Incorrect number of file matches: %r' % (fn_pair,))
         fns.extend(fn_pair)

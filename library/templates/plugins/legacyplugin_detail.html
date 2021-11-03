@@ -67,7 +67,7 @@
     sanitize: true,
     highlight: function(code) { return hljs.highlightAuto(code).value; },
   };
-  document.getElementById('description').innerHTML = marked('{{ plugin.description|escapejs }}', opts);
-  document.getElementById('install-guide').innerHTML = marked('{{ plugin.install_guide|escapejs }}', opts);
+  document.getElementById('description').innerHTML = marked.parse('{{ plugin.description|escapejs }}', opts);
+  document.getElementById('install-guide').innerHTML = marked.parse('{{ plugin.install_guide|escapejs }}', opts);
 </script>
 {% endblock %}

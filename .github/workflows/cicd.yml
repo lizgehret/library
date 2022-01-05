@@ -75,6 +75,7 @@ jobs:
       shell: bash -l {0}
       run: |
         flake8
+        q2lint
         python manage.py collectstatic --noinput
         python manage.py migrate --noinput
         celery worker -A config.celery &
@@ -113,10 +114,10 @@ jobs:
           sudo apt update
           sudo apt install software-properties-common
 
-      - name: set up python 3.6
+      - name: set up python 3.8
         uses: actions/setup-python@v2
         with:
-          python-version: 3.6
+          python-version: 3.8
 
       - name: install python dependencies
         run: |
